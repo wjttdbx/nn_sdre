@@ -30,27 +30,29 @@
 
 ## 版本对比
 
-| 特性 | 圆轨道版 | 椭圆两体版 | poliastro 版 |
-|------|----------|------------|--------------|
-| **文件名** | `python_SDRE.py` | `python_SDRE_elliptic.py` | `python_SDRE_poliastro.py` |
-| **轨道模型** | 常值平均角速度 n | 严格两体椭圆积分 | poliastro 椭圆轨道 |
-| **参考系** | LVLH 相对积分 | ECI 惯性系积分 | ECI 惯性系积分 |
-| **外部依赖** | NumPy, SciPy, Matplotlib | NumPy, SciPy, Matplotlib | + astropy, poliastro |
-| **计算复杂度** | 低 | 中 | 中 |
-| **精度** | 近似（仅适用于 e≈0） | 高（任意偏心率） | 高（任意偏心率） |
-| **可扩展性** | 有限 | 中等 | 高（支持摄动/多体） |
-| **推荐场景** | 快速原型、教学演示 | 精确仿真、论文复现 | 标准轨道工程、后续扩展 |
+| 特性           | 圆轨道版                 | 椭圆两体版                | poliastro 版               |
+| -------------- | ------------------------ | ------------------------- | -------------------------- |
+| **文件名**     | `python_SDRE.py`         | `python_SDRE_elliptic.py` | `python_SDRE_poliastro.py` |
+| **轨道模型**   | 常值平均角速度 n         | 严格两体椭圆积分          | poliastro 椭圆轨道         |
+| **参考系**     | LVLH 相对积分            | ECI 惯性系积分            | ECI 惯性系积分             |
+| **外部依赖**   | NumPy, SciPy, Matplotlib | NumPy, SciPy, Matplotlib  | + astropy, poliastro       |
+| **计算复杂度** | 低                       | 中                        | 中                         |
+| **精度**       | 近似（仅适用于 e≈0）     | 高（任意偏心率）          | 高（任意偏心率）           |
+| **可扩展性**   | 有限                     | 中等                      | 高（支持摄动/多体）        |
+| **推荐场景**   | 快速原型、教学演示       | 精确仿真、论文复现        | 标准轨道工程、后续扩展     |
 
 ---
 
 ## 依赖环境
 
 ### 基础依赖（所有版本）
+
 ```bash
 pip install numpy scipy matplotlib
 ```
 
 ### poliastro 版本额外依赖
+
 ```bash
 pip install astropy poliastro
 ```
@@ -62,32 +64,40 @@ pip install astropy poliastro
 ## 快速开始
 
 ### 1. 运行圆轨道版本（最快）
+
 ```bash
 python python_SDRE.py
 ```
+
 - 适用于圆轨道或近圆轨道（e < 0.1）
 - 运行速度最快，适合快速验证参数
 
 ### 2. 运行严格椭圆版本（精确）
+
 ```bash
 python python_SDRE_elliptic.py
 ```
+
 - 支持任意偏心率（包括本例的 e=0.5）
 - 纯 NumPy 实现，无额外依赖
 
 ### 3. 运行 poliastro 版本（标准）
+
 ```bash
 python python_SDRE_poliastro.py
 ```
+
 - 使用天文学标准库 poliastro
 - 便于后续添加轨道摄动（J2、大气阻力等）
 
 ### 生成 GIF 动画
 
 在各脚本中修改：
+
 ```python
 SAVE_GIF = True  # 默认为 False
 ```
+
 运行后将在当前目录生成 `eci_animation*.gif`。
 
 ---
@@ -96,18 +106,18 @@ SAVE_GIF = True  # 默认为 False
 
 所有版本均采用 **Table 1** 的统一参数（如论文所示）：
 
-| 参数 | 符号 | 值 |
-|------|------|-----|
-| 主星半长轴 | $a_c$ | 15000 km |
-| 主星偏心率 | $e_c$ | 0.5 |
-| 状态权重矩阵 | $Q$ | $\text{diag}(I_3, I_3)$ |
-| 控制权重基数 | $R$ | $10^{13} \times I_3$ |
-| 控制缩放因子 | $\gamma$ | $\sqrt{2}$ |
-| 追踪器初始位置（LVLH） | $\rho_0$ | [500, 500, 500] km |
+| 参数                   | 符号           | 值                      |
+| ---------------------- | -------------- | ----------------------- |
+| 主星半长轴             | $a_c$          | 15000 km                |
+| 主星偏心率             | $e_c$          | 0.5                     |
+| 状态权重矩阵           | $Q$            | $\text{diag}(I_3, I_3)$ |
+| 控制权重基数           | $R$            | $10^{13} \times I_3$    |
+| 控制缩放因子           | $\gamma$       | $\sqrt{2}$              |
+| 追踪器初始位置（LVLH） | $\rho_0$       | [500, 500, 500] km      |
 | 追踪器初始速度（LVLH） | $\dot{\rho}_0$ | [0.01, 0.01, 0.01] km/s |
-| 逃逸者初始状态 | - | LVLH 原点静止 |
-| 仿真时长 | $t_f$ | 10000 s |
-| 采样步长 | $\Delta t$ | 10 s |
+| 逃逸者初始状态         | -              | LVLH 原点静止           |
+| 仿真时长               | $t_f$          | 10000 s                 |
+| 采样步长               | $\Delta t$     | 10 s                    |
 
 ### 权重矩阵说明
 
@@ -124,10 +134,12 @@ SAVE_GIF = True  # 默认为 False
 每个版本运行后将生成以下图表：
 
 1. **LVLH 相对轨迹（3D）**
+
    - 展示追踪器相对逃逸者的运动轨迹
    - 坐标系：径向 x、沿轨 y、法向 z
 
 2. **ECI 惯性系轨迹（3D）**
+
    - 地球为中心、灰色半透明球体
    - 红色：目标（逃逸者/Chief）轨道
    - 蓝色：追踪器（Pursuer/Deputy）轨道
@@ -149,11 +161,13 @@ SAVE_GIF = True  # 默认为 False
 ### 版本 1：圆轨道 LVLH 近似版（`python_SDRE.py`）
 
 #### 核心假设
+
 - 主星在**圆轨道**上运动，平均角速度 $n = \sqrt{\mu/a^3}$ 为常数
 - 在 LVLH 坐标系下积分相对状态
 - 使用 CW 方程（Clohessy-Wiltshire）的非线性扩展
 
 #### 动力学方程
+
 $$
 \begin{aligned}
 \ddot{x} &= 2n\dot{y} + n^2 x + \frac{\mu}{R_c^2} - \frac{\mu(R_c+x)}{r_d^3} + u_{x,\text{net}} \\
@@ -165,11 +179,13 @@ $$
 其中 $r_d = \sqrt{(R_c+x)^2 + y^2 + z^2}$。
 
 #### 适用场景
+
 - 近圆轨道（$e \lesssim 0.1$）
 - 教学演示、算法快速验证
 - 计算资源受限的场景
 
 #### 局限性
+
 ⚠️ 当偏心率较大（如 0.5）时，常值 $n$ 假设引入较大误差。
 
 ---
@@ -177,11 +193,13 @@ $$
 ### 版本 2：严格椭圆两体版（`python_SDRE_elliptic.py`）
 
 #### 核心特性
+
 - 在**地心惯性系（ECI）**对 chief 和 deputy 同时积分
 - Chief（目标）沿两体椭圆轨道自由运动
 - 每个时间步：ECI → LVLH → SDRE 控制 → LVLH → ECI
 
 #### LVLH 角速度（时变）
+
 $$
 \omega(t) = \frac{\mathbf{h}}{r^2(t)}, \quad \dot{\omega}(t) = -2\frac{\dot{r}}{r}\omega(t)
 $$
@@ -189,16 +207,19 @@ $$
 其中 $\mathbf{h}$ 为角动量（常矢量）。
 
 #### 相对动力学
+
 $$
 \ddot{\boldsymbol{\rho}} = \mathbf{C}_{IL} (\mathbf{a}_d - \mathbf{a}_c) - 2\boldsymbol{\omega}_L \times \dot{\boldsymbol{\rho}} - \dot{\boldsymbol{\omega}}_L \times \boldsymbol{\rho} - \boldsymbol{\omega}_L \times (\boldsymbol{\omega}_L \times \boldsymbol{\rho})
 $$
 
 #### 适用场景
+
 - **任意偏心率**椭圆轨道（包括高偏心率）
 - 需要高精度结果的论文复现
 - 无需外部轨道库的独立实现
 
 #### 优势
+
 ✅ 纯 NumPy/SciPy 实现，依赖少  
 ✅ 完整保留椭圆轨道的非线性特性  
 ✅ 数值雅可比自适应状态变化
@@ -208,11 +229,13 @@ $$
 ### 版本 3：poliastro 轨道库版（`python_SDRE_poliastro.py`）
 
 #### 核心特性
+
 - 使用 **poliastro** + **astropy** 标准天文库
 - 从 Kepler 轨道根数初始化（$a, e, i, \Omega, \omega, \nu$）
 - 支持历元时间管理（UTC/TT）
 
 #### 轨道初始化示例
+
 ```python
 from poliastro.twobody import Orbit
 from poliastro.bodies import Earth
@@ -231,16 +254,19 @@ chief_orbit = Orbit.from_classical(
 ```
 
 #### 适用场景
+
 - 需要与标准轨道工程流程对接
 - 未来可能添加摄动模型（J2、J3、大气阻力、太阳辐射压等）
 - 需要处理复杂的坐标系转换（ECEF、MOD、TOD 等）
 
 #### 扩展性
+
 ✅ 轻松添加非球形引力场摄动  
 ✅ 支持三体/多体问题  
 ✅ 与其他天文学工具（如 Skyfield、SPICE）互操作
 
 #### 依赖成本
+
 ⚠️ 需要额外安装 astropy、poliastro（~50MB）
 
 ---
@@ -261,6 +287,7 @@ chief_orbit = Orbit.from_classical(
 ### 数值雅可比计算
 
 采用中心差分法：
+
 $$
 \frac{\partial f_i}{\partial x_j} \approx \frac{f_i(x + \epsilon_j \mathbf{e}_j) - f_i(x - \epsilon_j \mathbf{e}_j)}{2\epsilon_j}
 $$
@@ -270,6 +297,7 @@ $$
 ### 鞍点存在条件
 
 博弈有唯一鞍点解当且仅当：
+
 $$
 S_{\text{net}} = R_p^{-1} - R_e^{-1} > 0
 $$
@@ -282,29 +310,34 @@ $$
 
 基于 MacBook M1 Pro、Python 3.13、10000 秒仿真：
 
-| 版本 | 运行时间 | 内存占用 | 相对误差* |
-|------|----------|----------|-----------|
-| 圆轨道版 | ~8 秒 | ~120 MB | - |
-| 椭圆两体版 | ~45 秒 | ~180 MB | 基准 |
-| poliastro 版 | ~50 秒 | ~220 MB | < 0.1% |
+| 版本         | 运行时间 | 内存占用 | 相对误差\* |
+| ------------ | -------- | -------- | ---------- |
+| 圆轨道版     | ~8 秒    | ~120 MB  | -          |
+| 椭圆两体版   | ~45 秒   | ~180 MB  | 基准       |
+| poliastro 版 | ~50 秒   | ~220 MB  | < 0.1%     |
 
-*相对误差：相对于椭圆两体版的最终相对距离偏差。
+\*相对误差：相对于椭圆两体版的最终相对距离偏差。
 
 ---
 
 ## 常见问题
 
 ### Q1: 为什么圆轨道版的 e_c 参数设为 0.5 但不影响结果？
+
 **A:** 圆轨道版使用常值 $n = \sqrt{\mu/a^3}$ 积分相对动力学，`e_c` 参数仅被存储但不参与计算。该版本**本质上总是假设圆轨道**。对于 e=0.5 的情况，建议使用椭圆两体版或 poliastro 版。
 
 ### Q2: 如何判断追踪成功？
+
 **A:** 观察"相对距离-时间"曲线：
+
 - 若距离单调递减至接近 0 → 追踪成功
 - 若距离先减后增或震荡 → 逃逸者有效对抗
 - 当前参数下，追踪器占优（$R_p < \gamma^2 R_e$）
 
 ### Q3: 如何修改初始轨道平面？
+
 **A:** 在 poliastro 版中修改倾角 `inc` 和升交点赤经 `raan`：
+
 ```python
 chief_orbit = Orbit.from_classical(
     Earth,
@@ -319,13 +352,17 @@ chief_orbit = Orbit.from_classical(
 ```
 
 ### Q4: GIF 动画文件过大怎么办？
+
 **A:** 调整采样率和帧率：
+
 ```python
 save_eci_gif(..., stride=10, fps=10)  # 降低时间分辨率
 ```
 
 ### Q5: 能否添加 J2 摄动？
-**A:** 
+
+**A:**
+
 - 圆轨道版/椭圆版：需手动添加 J2 加速度项到 `two_body_accel()`
 - poliastro 版：可使用 `poliastro.core.perturbations` 模块（需后续开发）
 
@@ -333,11 +370,11 @@ save_eci_gif(..., stride=10, fps=10)  # 降低时间分辨率
 
 ## 参考文献
 
-1. Çimen, T. (2008). *State-Dependent Riccati Equation (SDRE) Control: A Survey*. IFAC Proceedings Volumes, 41(2), 3761-3775.
+1. Çimen, T. (2008). _State-Dependent Riccati Equation (SDRE) Control: A Survey_. IFAC Proceedings Volumes, 41(2), 3761-3775.
 
-2. Shen, H., & Tsiotras, P. (2003). *Optimal Two-Impulse Rendezvous Using Multiple-Revolution Lambert Solutions*. Journal of Guidance, Control, and Dynamics, 26(1), 50-61.
+2. Shen, H., & Tsiotras, P. (2003). _Optimal Two-Impulse Rendezvous Using Multiple-Revolution Lambert Solutions_. Journal of Guidance, Control, and Dynamics, 26(1), 50-61.
 
-3. Battin, R. H. (1999). *An Introduction to the Mathematics and Methods of Astrodynamics*. AIAA Education Series.
+3. Battin, R. H. (1999). _An Introduction to the Mathematics and Methods of Astrodynamics_. AIAA Education Series.
 
 4. poliastro Documentation: https://docs.poliastro.space/
 
@@ -352,9 +389,10 @@ save_eci_gif(..., stride=10, fps=10)  # 降低时间分辨率
 ## 联系方式
 
 如有问题或建议，请通过以下方式联系：
+
 - GitHub Issues: [项目仓库链接]
 - Email: [邮箱地址]
 
 ---
 
-**最后更新**：2025年12月12日
+**最后更新**：2025 年 12 月 12 日

@@ -303,7 +303,7 @@ if __name__ == "__main__":
     sol = solve_ivp(game.dynamics_inertial, t_span, y0, t_eval=t_eval, rtol=1e-6, atol=1e-9)
     print("仿真结束.")
 
-    SAVE_GIF = True
+    SAVE_GIF = False
 
     # 惯性系(ECI)下的轨迹：chief/target 与 deputy/pursuer 都在惯性系积分
     fig_eci = plt.figure(figsize=(10, 8))

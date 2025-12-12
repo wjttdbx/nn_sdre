@@ -318,7 +318,7 @@ if __name__ == "__main__":
     sol = solve_ivp(game.dynamics, t_span, x0, t_eval=t_eval, rtol=1e-5, atol=1e-8)
     print("仿真结束.")
 
-    SAVE_GIF = True
+    SAVE_GIF = False  # 是否保存 ECI 轨迹动图
     
     # 4. 结果可视化
     plt.figure(figsize=(10, 8))
