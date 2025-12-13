@@ -1,0 +1,29 @@
+{
+  "config": {
+    "a_c_km": 15000.0,
+    "e_c": 0.5,
+    "gamma": 1.4142135623730951,
+    "n_samples": 2000,
+    "seed": 0,
+    "pos_range_km": 1000.0,
+    "vel_range_km_s": 0.05,
+    "batch_size": 128,
+    "epochs": 3,
+    "lr": 0.0003,
+    "weight_decay": 1e-06,
+    "hidden": 256,
+    "layers": 3,
+    "model_type": "P",
+    "lambda_are": 0.001,
+    "target": "u_net"
+  },
+  "model": {
+    "in_dim": 6,
+    "out_dim": 21,
+    "hidden": 256,
+    "layers": 3,
+    "activation": "tanh",
+    "type": "P"
+  },
+  "best_val_mse_norm": 5.92877960059468e-08
+}
