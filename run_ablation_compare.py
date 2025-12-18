@@ -95,6 +95,25 @@ class TorchSurrogate:
             return u_p + u_e
         raise ValueError(f"Unsupported network output dim: {y.shape}")
 
+    def control(self, game: SpacecraftGame, state: np.ndarray) -> np.ndarray:
+        """Return LVLH acceleration control (3,) for the given state."""
+        if self.model_type != "V":
+            return self.control_from_output(game, state, self.predict(state))
+
+        x = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
+        x_norm = (x - self.x_mean) / self.x_std
+        x_norm = x_norm.clone().detach().requires_grad_(True)
+        V = self.net(x_norm).sum()
+        grad_norm = torch.autograd.grad(V, x_norm, create_graph=False)[0]
+        grad = grad_norm / self.x_std
+        grad_v = grad[0, 3:6].detach().cpu().numpy()
+
+        u_p = -0.5 * (game.inv_Rp @ grad_v)
+        u_e = +0.5 * (game.inv_Re @ grad_v)
+        if self.target == "u_p":
+            return u_p
+        return u_p + u_e
+
 
 def rel_dynamics(game: SpacecraftGame, state: np.ndarray, u: np.ndarray) -> np.ndarray:
     Rc = game.Rc
@@ -136,7 +155,7 @@ def summarize_one(model_path: Path, tf: float, dt: float, target_override: str |
 
     x0 = np.array([500.0, 500.0, 500.0, 0.01, 0.01, 0.01], dtype=float)
     t0 = time.time()
-    t_nn, x_nn = rollout_fixed_step(lambda s: surrogate.control_from_output(game, s, surrogate.predict(s)), game, x0, tf=tf, dt=dt)
+    t_nn, x_nn = rollout_fixed_step(lambda s: surrogate.control(game, s), game, x0, tf=tf, dt=dt)
     t1 = time.time()
     t_teacher, x_teacher = rollout_fixed_step(lambda s: teacher_control(game, s, target=target), game, x0, tf=tf, dt=dt)
     t2 = time.time()
@@ -156,7 +175,7 @@ def summarize_one(model_path: Path, tf: float, dt: float, target_override: str |
     for k in range(x_teacher.shape[0]):
         s = x_teacher[k]
         u_t[k] = teacher_control(game, s, target=target)
-        u_n[k] = surrogate.control_from_output(game, s, surrogate.predict(s))
+        u_n[k] = surrogate.control(game, s)
     u_rmse = rmse(u_n, u_t)
 
     payload = surrogate.payload

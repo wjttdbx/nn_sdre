@@ -47,6 +47,28 @@ class TorchSurrogate:
         # Training config may include whether the teacher target is u_net or u_p.
         self.target = payload.get("config", {}).get("target", "u_net")
 
+    def control(self, game: SpacecraftGame, state: np.ndarray) -> np.ndarray:
+        """Return LVLH acceleration control (3,) for the given state."""
+        # Direct u / P-output path
+        if self.model_type != "V":
+            y_out = self.predict(state)
+            return self.control_from_output(game, state, y_out)
+
+        # Value-function path: compute grad V via autograd, then use HJI optimal controls.
+        x = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
+        x_norm = (x - self.x_mean) / self.x_std
+        x_norm = x_norm.clone().detach().requires_grad_(True)
+        V = self.net(x_norm).sum()
+        grad_norm = torch.autograd.grad(V, x_norm, create_graph=False)[0]
+        grad = grad_norm / self.x_std
+        grad_v = grad[0, 3:6].detach().cpu().numpy()
+
+        u_p = -0.5 * (game.inv_Rp @ grad_v)
+        u_e = +0.5 * (game.inv_Re @ grad_v)
+        if self.target == "u_p":
+            return u_p
+        return u_p + u_e
+
     @torch.no_grad()
     def predict(self, x: np.ndarray) -> np.ndarray:
         xt = torch.tensor(x, dtype=torch.float32)
@@ -116,8 +138,7 @@ def simulate_with_nn(
 
     def dynamics(t, state):
         x, y, z, vx, vy, vz = state
-        y_out = surrogate.predict(state)
-        u = surrogate.control_from_output(game, state, y_out)
+        u = surrogate.control(game, state)
 
         r_d = np.sqrt((Rc + x) ** 2 + y**2 + z**2)
         ax = 2 * n * vy + n**2 * x + mu / Rc**2 - mu * (Rc + x) / r_d**3 + u[0]
@@ -165,8 +186,7 @@ def rollout_controls(game: SpacecraftGame, surrogate: TorchSurrogate, states: np
     for k in range(states.shape[0]):
         x = states[k]
         u_t[k] = teacher_control(game, x, target=target)
-        y_out = surrogate.predict(x)
-        u_n[k] = surrogate.control_from_output(game, x, y_out)
+        u_n[k] = surrogate.control(game, x)
     return u_t, u_n
 
 
