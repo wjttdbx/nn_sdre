@@ -5,6 +5,7 @@ import numpy as np
 import torch
 from scipy.integrate import solve_ivp
 import matplotlib.pyplot as plt
+import zhplot
 
 from python_SDRE import SpacecraftGame, plot_earth_sphere, save_eci_gif
 
@@ -311,7 +312,7 @@ def main():
         ax.set_xlabel("Radial x [km]")
         ax.set_ylabel("Along-track y [km]")
         ax.set_zlabel("Cross-track z [km]")
-        ax.set_title("LVLH Relative Trajectory")
+        ax.set_title("追逃相对轨迹（LVLH）")
         ax.legend()
         plt.show()
 
@@ -380,7 +381,7 @@ def main():
         ax_eci.set_xlabel("ECI x [km]")
         ax_eci.set_ylabel("ECI y [km]")
         ax_eci.set_zlabel("ECI z [km]")
-        ax_eci.set_title("Inertial Trajectories (ECI)")
+        ax_eci.set_title("惯性系轨迹（ECI）")
         ax_eci.legend()
         plt.show()
 
@@ -400,7 +401,7 @@ def main():
             plt.scatter([t_min_t], [min_dist_t], c="k", marker="x", s=60, label="Teacher closest")
         plt.xlabel("Time [s]")
         plt.ylabel("Relative Distance [km]")
-        plt.title("Interception Progress")
+        plt.title("接近过程（相对距离）")
         plt.grid(True)
         plt.legend()
         plt.show()

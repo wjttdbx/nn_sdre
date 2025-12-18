@@ -166,6 +166,27 @@ python train_control_surrogate_torch.py \
    --epochs 50
 ```
 
+> 如果生成数据集耗时较长，可复用/缓存 `.npz` 数据集：
+
+```bash
+# 如 data/trajectory_elliptic_tf2000_dt10_seed0.npz 不存在，会先生成再写入该路径；存在则直接加载。
+python train_control_surrogate_torch.py \
+   --dataset data/trajectory_elliptic_tf2000_dt10_seed0.npz \
+   --out models/control/sdre_control_net.pt \
+   --model-type u \
+   --data-mode trajectory \
+   --teacher elliptic \
+   --tf 2000 --dt 10 \
+   --target u_net \
+   --n-samples 8000 \
+   --epochs 50
+
+# 若只想另存生成的数据集，可用单独的保存路径
+python train_control_surrogate_torch.py \
+   --save-dataset data/my_cached_dataset.npz \
+   --model-type u --data-mode trajectory --teacher elliptic
+```
+
 如果你想复用旧版“圆轨道 LVLH 近似 teacher + 状态空间均匀采样”的数据：
 
 ```bash

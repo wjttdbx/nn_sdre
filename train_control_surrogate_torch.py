@@ -243,6 +243,32 @@ def build_dataset(cfg: TrainConfig) -> Tuple[np.ndarray, np.ndarray]:
     return X, Y
 
 
+def save_dataset_cache(path: Path, X: np.ndarray, Y: np.ndarray, cfg: TrainConfig) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    meta = {
+        "config": asdict(cfg),
+        "n_samples": int(X.shape[0]),
+        "data_mode": cfg.data_mode,
+        "teacher": cfg.teacher,
+    }
+    np.savez(path, X=X.astype(np.float32), Y=Y.astype(np.float32), meta=json.dumps(meta, ensure_ascii=False))
+    print(f"Cached dataset to {path} (X{X.shape}, Y{Y.shape})")
+
+
+def load_dataset_cache(path: Path) -> tuple[np.ndarray, np.ndarray, dict | None]:
+    data = np.load(path, allow_pickle=False)
+    X = data["X"].astype(np.float32)
+    Y = data["Y"].astype(np.float32)
+    meta = None
+    if "meta" in data:
+        try:
+            meta = json.loads(str(data["meta"].item()))
+        except Exception:
+            meta = None
+    print(f"Loaded cached dataset from {path} (X{X.shape}, Y{Y.shape})")
+    return X, Y, meta
+
+
 def are_residual(game: SpacecraftGame, x: np.ndarray, P: np.ndarray) -> np.ndarray:
     """GARE residual: A^T P + P A - P S P + Q, where S = B inv(Rp) B^T - B inv(Re) B^T."""
     A, Bp, Be = game.get_sdc_matrices(x)
@@ -279,6 +305,8 @@ def main() -> None:
     parser.add_argument("--tf", type=float, default=2000.0, help="Trajectory rollout horizon [s] (trajectory mode)")
     parser.add_argument("--dt", type=float, default=10.0, help="Trajectory rollout step [s] (trajectory mode)")
     parser.add_argument("--n-trajectories", type=int, default=32, help="Number of rollouts to try (trajectory mode; may be exceeded to reach n-samples)")
+    parser.add_argument("--dataset", type=str, default=None, help="Path to a cached dataset (.npz). If missing, a new dataset will be generated and saved to this path.")
+    parser.add_argument("--save-dataset", type=str, default=None, help="Force saving the newly generated dataset to this path (.npz). Useful when --dataset is not set.")
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--pos-range-km", type=float, default=1000.0)
@@ -304,12 +332,34 @@ def main() -> None:
         lambda_are=float(args.lambda_are),
     )
 
+    dataset_path = Path(args.dataset) if args.dataset else None
+    save_dataset_path = Path(args.save_dataset) if args.save_dataset else None
+    if dataset_path is not None and save_dataset_path is None and not dataset_path.exists():
+        # If user specifies a dataset path that does not exist, reuse it as the save path.
+        save_dataset_path = dataset_path
+
     # The circular game is only needed for uniform/circular mode and the optional differentiable ARE residual term.
     circular_game = None
     if cfg.teacher == "circular" or cfg.lambda_are > 0.0:
         circular_game = SpacecraftGame(chief_semi_major_axis=cfg.a_c_km, chief_eccentricity=cfg.e_c, gamma=cfg.gamma)
 
-    X, Y_teacher = build_dataset(cfg)
+    meta = None
+    if dataset_path is not None and dataset_path.exists():
+        X, Y_teacher, meta = load_dataset_cache(dataset_path)
+        if meta and "config" in meta:
+            cfg_meta = meta["config"]
+            mismatches = []
+            for key in ["data_mode", "teacher", "tf_s", "dt_s", "n_samples"]:
+                if key in cfg_meta and getattr(cfg, key, None) != cfg_meta[key]:
+                    mismatches.append((key, cfg_meta[key], getattr(cfg, key, None)))
+            if mismatches:
+                print("Warning: cached dataset config differs from current args:")
+                for k, old, new in mismatches:
+                    print(f"  {k}: cached={old} current={new}")
+    else:
+        X, Y_teacher = build_dataset(cfg)
+        if save_dataset_path is not None:
+            save_dataset_cache(save_dataset_path, X, Y_teacher, cfg)
 
     # normalization (always normalize inputs; outputs depend on model type)
     x_mean = X.mean(axis=0)

@@ -5,6 +5,7 @@ from scipy.integrate import solve_ivp
 import matplotlib.pyplot as plt
 from matplotlib import animation
 from pathlib import Path
+import zhplot
 
 # ==========================================
 # 物理常数与参数定义
@@ -33,7 +34,7 @@ def save_eci_gif(chief_r_eci, pursuer_r_eci, out_path="outputs/gifs/eci_animatio
     ax.set_xlabel("ECI x [km]")
     ax.set_ylabel("ECI y [km]")
     ax.set_zlabel("ECI z [km]")
-    ax.set_title("Inertial Trajectories (ECI) - Animation")
+    ax.set_title("惯性系轨迹（ECI）- 动画")
 
     (chief_line,) = ax.plot([], [], [], "r", label="Target/Chief (ECI)")
     (pursuer_line,) = ax.plot([], [], [], "b", label="Pursuer/Deputy (ECI)")
@@ -353,7 +354,7 @@ if __name__ == "__main__":
         ax.set_xlabel('Radial (x) [km]')
         ax.set_ylabel('Along-Track (y) [km]')
         ax.set_zlabel('Cross-Track (z) [km]')
-        ax.set_title('Spacecraft Pursuit-Evasion Trajectory (LVLH Frame)')
+        ax.set_title('追逃相对轨迹（LVLH）')
         ax.legend()
         plt.show()
 
@@ -391,7 +392,7 @@ if __name__ == "__main__":
         ax_eci.set_xlabel('ECI x [km]')
         ax_eci.set_ylabel('ECI y [km]')
         ax_eci.set_zlabel('ECI z [km]')
-        ax_eci.set_title('Inertial Trajectories (ECI)')
+        ax_eci.set_title('惯性系轨迹（ECI）')
         ax_eci.legend()
         plt.show()
 
@@ -405,7 +406,7 @@ if __name__ == "__main__":
         plt.scatter([t_min], [min_dist], c='b', marker='x', s=60, label='Closest')
         plt.xlabel('Time [s]')
         plt.ylabel('Relative Distance [km]')
-        plt.title('Interception Progress')
+        plt.title('接近过程（相对距离）')
         plt.grid(True)
         plt.legend()
         plt.show()

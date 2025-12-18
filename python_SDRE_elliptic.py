@@ -4,6 +4,7 @@ from scipy.integrate import solve_ivp
 import matplotlib.pyplot as plt
 from matplotlib import animation
 from pathlib import Path
+import zhplot
 
 MU_EARTH = 398600.4418  # km^3/s^2
 RE_EARTH = 6378.137     # km
@@ -29,7 +30,7 @@ def save_eci_gif(chief_r_eci, deputy_r_eci, out_path="eci_animation_elliptic.gif
     ax.set_xlabel("ECI x [km]")
     ax.set_ylabel("ECI y [km]")
     ax.set_zlabel("ECI z [km]")
-    ax.set_title("Inertial Trajectories (ECI) - Animation")
+    ax.set_title("惯性系轨迹（ECI）- 动画")
 
     (chief_line,) = ax.plot([], [], [], "r", label="Target/Chief (ECI)")
     (deputy_line,) = ax.plot([], [], [], "b", label="Pursuer/Deputy (ECI)")
@@ -318,7 +319,7 @@ if __name__ == "__main__":
     ax_eci.set_xlabel("ECI x [km]")
     ax_eci.set_ylabel("ECI y [km]")
     ax_eci.set_zlabel("ECI z [km]")
-    ax_eci.set_title("Inertial Trajectories (ECI)")
+    ax_eci.set_title("惯性系轨迹（ECI）")
     ax_eci.legend()
     plt.show()
 
@@ -346,7 +347,7 @@ if __name__ == "__main__":
     ax.set_xlabel("Radial x [km]")
     ax.set_ylabel("Along-track y [km]")
     ax.set_zlabel("Cross-track z [km]")
-    ax.set_title("Pursuit-Evasion (Elliptic Chief, LVLH Relative)")
+    ax.set_title("追逃相对轨迹（LVLH，相对椭圆主星）")
     ax.legend()
     plt.show()
 
@@ -355,6 +356,6 @@ if __name__ == "__main__":
     plt.plot(sol.t, dist)
     plt.xlabel("Time [s]")
     plt.ylabel("Relative Distance [km]")
-    plt.title("Interception Progress")
+    plt.title("接近过程（相对距离）")
     plt.grid(True)
     plt.show()

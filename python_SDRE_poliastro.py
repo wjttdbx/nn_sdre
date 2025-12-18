@@ -19,9 +19,11 @@ from astropy import units as u
 from astropy.time import Time
 from poliastro.bodies import Earth
 from poliastro.twobody import Orbit
+import zhplot
 
 MU_EARTH = 398600.4418  # km^3/s^2
 RE_EARTH = 6378.137  # km
+J2 = 1.08262668e-3    # Earth J2
 
 
 def plot_earth_sphere(ax, radius=RE_EARTH, n_u=36, n_v=18, alpha=0.25):
@@ -88,6 +90,20 @@ def inertial_from_rel(
 def two_body_accel(r: np.ndarray, mu: float = MU_EARTH) -> np.ndarray:
     """两体引力加速度"""
     return -mu * r / (np.linalg.norm(r) ** 3)
+
+
+def j2_accel(r: np.ndarray, mu: float = MU_EARTH, Re: float = RE_EARTH, J2_val: float = J2) -> np.ndarray:
+    """J2 摄动加速度（单位 km/s^2）。"""
+    x, y, z = r
+    r_norm = np.linalg.norm(r)
+    if r_norm == 0.0:
+        return np.zeros(3, dtype=float)
+    zx = z / r_norm
+    factor = 1.5 * J2_val * mu * (Re**2) / (r_norm**5)
+    ax = factor * x * (5 * zx**2 - 1)
+    ay = factor * y * (5 * zx**2 - 1)
+    az = factor * z * (5 * zx**2 - 3)
+    return np.array([ax, ay, az], dtype=float)
 
 
 def rel_xdot_uncontrolled(chief_r: np.ndarray, chief_v: np.ndarray, x_rel: np.ndarray) -> np.ndarray:
@@ -197,8 +213,8 @@ class SpacecraftGamePoliastro:
 
         C_LI, _ = lvlh_dcm(chief_r, chief_v)
 
-        a_c = two_body_accel(chief_r)
-        a_d = two_body_accel(deputy_r) + (C_LI @ u_net_l)
+        a_c = two_body_accel(chief_r) + j2_accel(chief_r)
+        a_d = two_body_accel(deputy_r) + j2_accel(deputy_r) + (C_LI @ u_net_l)
 
         return np.hstack((chief_v, a_c, deputy_v, a_d)).astype(float)
 
@@ -214,7 +230,7 @@ def save_eci_gif(chief_r_eci, deputy_r_eci, out_path="outputs/gifs/eci_animation
     ax.set_xlabel("ECI x [km]")
     ax.set_ylabel("ECI y [km]")
     ax.set_zlabel("ECI z [km]")
-    ax.set_title("Inertial Trajectories (ECI) - Animation")
+    ax.set_title("惯性系轨迹（ECI）- 动画")
 
     (chief_line,) = ax.plot([], [], [], "r", label="Target/Chief (ECI)")
     (deputy_line,) = ax.plot([], [], [], "b", label="Pursuer/Deputy (ECI)")
@@ -302,36 +318,16 @@ if __name__ == "__main__":
     game = SpacecraftGamePoliastro(a_c=a_c, e_c=e_c, gamma=gamma)
 
     # 积分求解
-    t_span = (0.0, 10000.0)  # 10000 秒
+    t_span = (0.0, 20000.0)  # 20000 秒
     t_eval = np.arange(t_span[0], t_span[1] + 1e-9, 10.0)
 
     print("开始 SDRE（poliastro 版）博弈仿真...")
     sol = solve_ivp(game.dynamics_inertial, t_span, y0, t_eval=t_eval, rtol=1e-6, atol=1e-9)
     print("仿真结束.")
 
-    SAVE_GIF = True
+    SAVE_GIF = False
 
-    # 惯性系 (ECI) 轨迹图
-    fig_eci = plt.figure(figsize=(10, 8))
-    ax_eci = plt.axes(projection="3d")
-    plot_earth_sphere(ax_eci)
-    ax_eci.plot3D(sol.y[0], sol.y[1], sol.y[2], "r", label="Target/Chief (ECI)")
-    ax_eci.plot3D(sol.y[6], sol.y[7], sol.y[8], "b", label="Pursuer/Deputy (ECI)")
-    ax_eci.scatter3D(sol.y[0, 0], sol.y[1, 0], sol.y[2, 0], c="r", marker="o", s=30)
-    ax_eci.scatter3D(sol.y[6, 0], sol.y[7, 0], sol.y[8, 0], c="b", marker="o", s=30)
-    ax_eci.set_xlabel("ECI x [km]")
-    ax_eci.set_ylabel("ECI y [km]")
-    ax_eci.set_zlabel("ECI z [km]")
-    ax_eci.set_title("Inertial Trajectories (ECI) - poliastro version")
-    ax_eci.legend()
-    plt.show()
-
-    if SAVE_GIF:
-        chief_r_eci = sol.y[0:3]
-        deputy_r_eci = sol.y[6:9]
-        save_eci_gif(chief_r_eci, deputy_r_eci, out_path="outputs/gifs/eci_animation_poliastro.gif", stride=5, fps=20)
-
-    # LVLH 相对轨迹
+    # 先重建 LVLH 相对轨迹，便于计算最近距离
     rel_xyz = np.zeros((3, sol.t.size), dtype=float)
     for k in range(sol.t.size):
         yk = sol.y[:, k]
@@ -342,24 +338,54 @@ if __name__ == "__main__":
         rho, _ = rel_from_inertial(chief_r, chief_v, deputy_r, deputy_v)
         rel_xyz[:, k] = rho
 
+    dist = np.linalg.norm(rel_xyz, axis=0)
+    k_min = int(np.argmin(dist))
+    min_dist = float(dist[k_min])
+    t_min = float(sol.t[k_min])
+    print(f"最近距离: {min_dist:.6g} km @ t={t_min:.6g} s")
+
+    # 惯性系 (ECI) 轨迹图
+    fig_eci = plt.figure(figsize=(10, 8))
+    ax_eci = plt.axes(projection="3d")
+    plot_earth_sphere(ax_eci)
+    ax_eci.plot3D(sol.y[0], sol.y[1], sol.y[2], "r", label="Target/Chief (ECI)")
+    ax_eci.plot3D(sol.y[6], sol.y[7], sol.y[8], "b", label="Pursuer/Deputy (ECI)")
+    ax_eci.scatter3D(sol.y[0, 0], sol.y[1, 0], sol.y[2, 0], c="r", marker="o", s=30)
+    ax_eci.scatter3D(sol.y[6, 0], sol.y[7, 0], sol.y[8, 0], c="b", marker="o", s=30)
+    ax_eci.scatter3D(sol.y[6, k_min], sol.y[7, k_min], sol.y[8, k_min], c="b", marker="x", s=60, label=f"Closest (t={t_min:.0f}s)")
+    ax_eci.set_xlabel("ECI x [km]")
+    ax_eci.set_ylabel("ECI y [km]")
+    ax_eci.set_zlabel("ECI z [km]")
+    ax_eci.set_title("惯性系轨迹（ECI）- poliastro 版本")
+    ax_eci.legend()
+    plt.show()
+
+    if SAVE_GIF:
+        chief_r_eci = sol.y[0:3]
+        deputy_r_eci = sol.y[6:9]
+        save_eci_gif(chief_r_eci, deputy_r_eci, out_path="outputs/gifs/eci_animation_poliastro.gif", stride=5, fps=20)
+
+    # LVLH 相对轨迹
     fig = plt.figure(figsize=(10, 8))
     ax = plt.axes(projection="3d")
     ax.plot3D(rel_xyz[0], rel_xyz[1], rel_xyz[2], "b", label="Pursuer (relative LVLH)")
     ax.scatter3D(0, 0, 0, c="r", marker="*", s=100, label="Evader (origin)")
     ax.scatter3D(rho0[0], rho0[1], rho0[2], c="g", marker="o", label="Start")
+    ax.scatter3D(rel_xyz[0, k_min], rel_xyz[1, k_min], rel_xyz[2, k_min], c="b", marker="x", s=60, label=f"Closest (t={t_min:.0f}s)")
     ax.set_xlabel("Radial x [km]")
     ax.set_ylabel("Along-track y [km]")
     ax.set_zlabel("Cross-track z [km]")
-    ax.set_title("Pursuit-Evasion (LVLH Relative) - poliastro version")
+    ax.set_title("追逃相对轨迹（LVLH）- poliastro 版本")
     ax.legend()
     plt.show()
 
     # 相对距离随时间
-    dist = np.linalg.norm(rel_xyz, axis=0)
     plt.figure()
     plt.plot(sol.t, dist)
+    plt.scatter([t_min], [min_dist], c="b", marker="x", s=60, label="Closest")
     plt.xlabel("Time [s]")
     plt.ylabel("Relative Distance [km]")
-    plt.title("Interception Progress")
+    plt.title("接近过程（相对距离）")
     plt.grid(True)
+    plt.legend()
     plt.show()
