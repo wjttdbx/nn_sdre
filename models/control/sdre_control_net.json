@@ -7,12 +7,21 @@
     "seed": 0,
     "pos_range_km": 1000.0,
     "vel_range_km_s": 0.05,
+    "data_mode": "trajectory",
+    "teacher": "elliptic",
+    "tf_s": 3600.0,
+    "dt_s": 10.0,
+    "n_trajectories": 32,
+    "init_center_pos_km": 500.0,
+    "init_center_vel_km_s": 0.01,
     "batch_size": 512,
     "epochs": 50,
     "lr": 0.0003,
     "weight_decay": 1e-06,
     "hidden": 256,
     "layers": 3,
+    "model_type": "u",
+    "lambda_are": 0.0,
     "target": "u_net"
   },
   "model": {
@@ -20,7 +29,8 @@
     "out_dim": 3,
     "hidden": 256,
     "layers": 3,
-    "activation": "tanh"
+    "activation": "tanh",
+    "type": "u"
   },
-  "best_val_mse_norm": 0.0005276013980619609
+  "best_val_mse_norm": 0.004333497025072575
 }

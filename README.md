@@ -98,7 +98,7 @@ SDRE/
 - `python_SDRE_poliastro.py`：用 poliastro/astropy 初始化并传播轨道的版本，便于后续工程扩展。
 - `train_control_surrogate_torch.py`：训练控制律网络（两种结构）：
   - `model-type=u`：网络直接输出控制向量 `u`（3 维）。
-  - `model-type=P`：网络输出对称矩阵 `P`（21 维），再由 `u = -R^{-1} B^T P x` 得到控制；可加 ARE 残差做消融。
+   - `model-type=P`：网络输出对称矩阵 `P`（21 维），再由 `u = -R^{-1} B^T P x` 得到控制；可加 ARE 残差做消融（仅支持圆轨道 teacher）。
 - `train_value_pinn_torch.py`：训练值函数 `V(x)`（1 维标量），用 HJI/HJB 残差作为“PDE 约束”；支持残差/分项归一化。
 - `python_SDRE_nn.py`：加载 `models/` 下的模型（u / P / V），闭环仿真并可用 `--compare-teacher` 与在线 teacher 对比。
 - `run_ablation_compare.py`：固定步长滚动（RK4）的一键对比脚本，适合长时（例如 6000s）消融，输出表格并可写 CSV。
@@ -150,15 +150,30 @@ SAVE_GIF = True  # 默认为 False
 
 ### 1) 训练控制律模型（监督学习 / 消融）
 
+默认数据集生成方式为：**沿轨迹采样**（roll-out），并用 **严格椭圆 teacher**（[python_SDRE_elliptic.py](python_SDRE_elliptic.py)）在每个时间步打标签得到 `u_p/u_net`。
+
 训练 baseline（直接输出 `u`）：
 
 ```bash
 python train_control_surrogate_torch.py \
    --out models/control/sdre_control_net.pt \
    --model-type u \
+   --data-mode trajectory \
+   --teacher elliptic \
+   --tf 2000 --dt 10 \
    --target u_net \
    --n-samples 8000 \
    --epochs 50
+```
+
+如果你想复用旧版“圆轨道 LVLH 近似 teacher + 状态空间均匀采样”的数据：
+
+```bash
+python train_control_surrogate_torch.py \
+   --data-mode uniform \
+   --teacher circular \
+   --model-type u \
+   --target u_net
 ```
 
 训练结构化 `P`（无 ARE 残差）：
@@ -167,6 +182,8 @@ python train_control_surrogate_torch.py \
 python train_control_surrogate_torch.py \
    --out models/control/sdre_control_net_P_are0.pt \
    --model-type P \
+   --data-mode uniform \
+   --teacher circular \
    --lambda-are 0 \
    --target u_net
 ```
@@ -177,9 +194,13 @@ python train_control_surrogate_torch.py \
 python train_control_surrogate_torch.py \
    --out models/control/sdre_control_net_P_are1e-3.pt \
    --model-type P \
+   --data-mode uniform \
+   --teacher circular \
    --lambda-are 1e-3 \
    --target u_net
 ```
+
+> 说明：`model-type=P`（以及 `--lambda-are` 的 ARE 残差消融）目前仅支持圆轨道 teacher。
 
 ### 2) 训练值函数模型（PINN / HJI 残差）
 

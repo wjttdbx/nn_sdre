@@ -10,6 +10,13 @@ from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
 from python_SDRE import SpacecraftGame
+from python_SDRE_elliptic import (
+    SpacecraftGameElliptic,
+    chief_perigee_state,
+    inertial_from_rel,
+    rel_from_inertial,
+    two_body_accel,
+)
 
 
 @dataclass
@@ -24,6 +31,15 @@ class TrainConfig:
     # sampling ranges (LVLH state)
     pos_range_km: float = 1000.0
     vel_range_km_s: float = 0.05
+
+    # dataset generation
+    data_mode: str = "trajectory"  # trajectory | uniform
+    teacher: str = "elliptic"  # elliptic | circular
+    tf_s: float = 2000.0
+    dt_s: float = 10.0
+    n_trajectories: int = 32
+    init_center_pos_km: float = 500.0
+    init_center_vel_km_s: float = 0.01
 
     # training
     batch_size: int = 512
@@ -86,7 +102,120 @@ def sample_states(cfg: TrainConfig, rng: np.random.Generator, n: int) -> np.ndar
     return np.hstack([pos, vel]).astype(np.float64)
 
 
+def _rk4_step(fun, t: float, y: np.ndarray, dt: float) -> np.ndarray:
+    k1 = fun(t, y)
+    k2 = fun(t + 0.5 * dt, y + 0.5 * dt * k1)
+    k3 = fun(t + 0.5 * dt, y + 0.5 * dt * k2)
+    k4 = fun(t + dt, y + dt * k3)
+    return y + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+
+
+def _sample_initial_rel(cfg: TrainConfig, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
+    """Sample an initial LVLH relative state for trajectory rollouts.
+
+    Centered around the Table-1 nominal values with uniform jitter.
+    """
+    center_rho = np.array([cfg.init_center_pos_km] * 3, dtype=float)
+    center_rhodot = np.array([cfg.init_center_vel_km_s] * 3, dtype=float)
+
+    rho0 = center_rho + rng.uniform(-cfg.pos_range_km, cfg.pos_range_km, size=(3,))
+    rhodot0 = center_rhodot + rng.uniform(-cfg.vel_range_km_s, cfg.vel_range_km_s, size=(3,))
+    return rho0, rhodot0
+
+
+def _elliptic_rollout_pairs(cfg: TrainConfig) -> Tuple[np.ndarray, np.ndarray]:
+    """Generate (x_rel, u_teacher) by rolling out the accurate elliptic teacher."""
+    if cfg.model_type != "u":
+        raise ValueError(
+            "trajectory+elliptic teacher currently supports only model-type=u. "
+            "The elliptic teacher is time-varying (depends on orbital phase), so learning a pure P(x) mapping is ill-posed."
+        )
+
+    rng = np.random.default_rng(cfg.seed)
+    game = SpacecraftGameElliptic(a_c=cfg.a_c_km, e_c=cfg.e_c, gamma=cfg.gamma)
+
+    # chief initial state (perigee)
+    r_c0, v_c0 = chief_perigee_state(cfg.a_c_km, cfg.e_c)
+
+    n_steps = int(np.floor(cfg.tf_s / cfg.dt_s))
+    if n_steps < 1:
+        raise ValueError("tf_s must be >= dt_s")
+
+    xs: list[np.ndarray] = []
+    ys: list[np.ndarray] = []
+
+    def f_dyn(t: float, y: np.ndarray) -> np.ndarray:
+        chief_r = y[0:3]
+        chief_v = y[3:6]
+        deputy_r = y[6:9]
+        deputy_v = y[9:12]
+
+        rho, rho_dot, C_LI, _, _ = rel_from_inertial(chief_r, chief_v, deputy_r, deputy_v)
+        x_rel = np.hstack((rho, rho_dot))
+
+        A = game.sdc_A(chief_r, chief_v, x_rel)
+        u_p, u_e = game.get_control(A, x_rel)
+        u_net_l = u_p + u_e
+
+        a_c = two_body_accel(chief_r)
+        a_d = two_body_accel(deputy_r) + (C_LI @ u_net_l)
+        return np.hstack((chief_v, a_c, deputy_v, a_d)).astype(float)
+
+    traj_attempts = 0
+    while len(xs) < cfg.n_samples:
+        traj_attempts += 1
+        rho0, rhodot0 = _sample_initial_rel(cfg, rng)
+        r_d0, v_d0 = inertial_from_rel(r_c0, v_c0, rho0, rhodot0)
+        y = np.hstack((r_c0, v_c0, r_d0, v_d0)).astype(float)
+        t = 0.0
+
+        for _ in range(n_steps + 1):
+            chief_r = y[0:3]
+            chief_v = y[3:6]
+            deputy_r = y[6:9]
+            deputy_v = y[9:12]
+            rho, rho_dot, _, _, _ = rel_from_inertial(chief_r, chief_v, deputy_r, deputy_v)
+            x_rel = np.hstack((rho, rho_dot))
+
+            A = game.sdc_A(chief_r, chief_v, x_rel)
+            u_p, u_e = game.get_control(A, x_rel)
+            if cfg.target == "u_p":
+                u = u_p
+            else:
+                u = u_p + u_e
+
+            if not (np.all(np.isfinite(x_rel)) and np.all(np.isfinite(u))):
+                break
+
+            xs.append(x_rel.astype(np.float64))
+            ys.append(u.astype(np.float64))
+            if len(xs) >= cfg.n_samples:
+                break
+
+            y = _rk4_step(f_dyn, t, y, float(cfg.dt_s))
+            t += float(cfg.dt_s)
+
+        if traj_attempts % 5 == 0:
+            print(f"Rollout progress: {len(xs)}/{cfg.n_samples} samples collected...")
+
+    X = np.stack(xs[: cfg.n_samples], axis=0).astype(np.float32)
+    Y = np.stack(ys[: cfg.n_samples], axis=0).astype(np.float32)
+    print(f"Dataset(trajectory): {X.shape[0]} samples from rollouts (dt={cfg.dt_s}, tf={cfg.tf_s})")
+    return X, Y
+
+
 def build_dataset(cfg: TrainConfig) -> Tuple[np.ndarray, np.ndarray]:
+    if cfg.data_mode == "trajectory":
+        if cfg.teacher != "elliptic":
+            raise ValueError("trajectory mode currently supports only teacher=elliptic")
+        return _elliptic_rollout_pairs(cfg)
+
+    if cfg.data_mode != "uniform":
+        raise ValueError(f"Unknown data_mode: {cfg.data_mode}")
+
+    if cfg.teacher != "circular":
+        raise ValueError("uniform mode currently supports only teacher=circular")
+
     rng = np.random.default_rng(cfg.seed)
     game = SpacecraftGame(chief_semi_major_axis=cfg.a_c_km, chief_eccentricity=cfg.e_c, gamma=cfg.gamma)
 
@@ -110,7 +239,7 @@ def build_dataset(cfg: TrainConfig) -> Tuple[np.ndarray, np.ndarray]:
     X = np.stack(xs, axis=0).astype(np.float32)
     Y = np.stack(ys, axis=0).astype(np.float32)
     kept_ratio = float(len(xs) / attempts)
-    print(f"Dataset: {X.shape[0]} samples kept (kept_ratio={kept_ratio:.3f})")
+    print(f"Dataset(uniform): {X.shape[0]} samples kept (kept_ratio={kept_ratio:.3f})")
     return X, Y
 
 
@@ -142,9 +271,14 @@ def sym6_from_upper21(u: torch.Tensor) -> torch.Tensor:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Train a torch surrogate for SDRE control (circular LVLH).")
+    parser = argparse.ArgumentParser(description="Train a torch surrogate for SDRE control.")
     parser.add_argument("--out", type=str, default="models/control/sdre_control_net.pt", help="Output model path")
+    parser.add_argument("--data-mode", type=str, default="trajectory", choices=["trajectory", "uniform"], help="How to sample states")
+    parser.add_argument("--teacher", type=str, default="elliptic", choices=["elliptic", "circular"], help="Which teacher model to label data")
     parser.add_argument("--n-samples", type=int, default=8000)
+    parser.add_argument("--tf", type=float, default=2000.0, help="Trajectory rollout horizon [s] (trajectory mode)")
+    parser.add_argument("--dt", type=float, default=10.0, help="Trajectory rollout step [s] (trajectory mode)")
+    parser.add_argument("--n-trajectories", type=int, default=32, help="Number of rollouts to try (trajectory mode; may be exceeded to reach n-samples)")
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--pos-range-km", type=float, default=1000.0)
@@ -155,7 +289,12 @@ def main() -> None:
     args = parser.parse_args()
 
     cfg = TrainConfig(
+        data_mode=args.data_mode,
+        teacher=args.teacher,
         n_samples=args.n_samples,
+        tf_s=float(args.tf),
+        dt_s=float(args.dt),
+        n_trajectories=int(args.n_trajectories),
         epochs=args.epochs,
         batch_size=args.batch_size,
         pos_range_km=args.pos_range_km,
@@ -165,7 +304,10 @@ def main() -> None:
         lambda_are=float(args.lambda_are),
     )
 
-    game = SpacecraftGame(chief_semi_major_axis=cfg.a_c_km, chief_eccentricity=cfg.e_c, gamma=cfg.gamma)
+    # The circular game is only needed for uniform/circular mode and the optional differentiable ARE residual term.
+    circular_game = None
+    if cfg.teacher == "circular" or cfg.lambda_are > 0.0:
+        circular_game = SpacecraftGame(chief_semi_major_axis=cfg.a_c_km, chief_eccentricity=cfg.e_c, gamma=cfg.gamma)
 
     X, Y_teacher = build_dataset(cfg)
 
@@ -241,8 +383,10 @@ def main() -> None:
                 # u_p = -inv(Rp) * (P x)_vel
                 Px = torch.bmm(P, x_raw_b.unsqueeze(-1)).squeeze(-1)
                 BTPx = Px[:, 3:6]
-                inv_Rp = torch.tensor(game.inv_Rp.astype(np.float32), device=device)
-                inv_Re = torch.tensor(game.inv_Re.astype(np.float32), device=device)
+                # Table-1 weights: Rp = 1e13 I, Re = gamma^2 Rp
+                inv_rp_scalar = torch.tensor(1e-13, dtype=torch.float32, device=device)
+                inv_Rp = inv_rp_scalar * torch.eye(3, dtype=torch.float32, device=device)
+                inv_Re = (inv_rp_scalar / (float(cfg.gamma) ** 2)) * torch.eye(3, dtype=torch.float32, device=device)
                 u_p = -(BTPx @ inv_Rp.T)
                 u_e = (BTPx @ inv_Re.T)
                 u_net = u_p + u_e
@@ -251,14 +395,16 @@ def main() -> None:
 
                 loss_are = torch.tensor(0.0, device=device)
                 if cfg.lambda_are > 0.0:
+                    if circular_game is None:
+                        raise RuntimeError("Internal error: circular teacher is required for lambda_are > 0")
                     # Compute ARE residual in numpy (per-sample) then backprop through P is not possible.
                     # So we compute a differentiable surrogate residual using torch with A(x) approximated via the teacher function is not available.
                     # To keep it simple and correct, we implement A(x) in torch using the same formulas as python_SDRE.get_sdc_matrices.
                     # (This keeps gradients w.r.t P, enabling physics-informed regularization.)
 
                     mu = torch.tensor(398600.4418, device=device, dtype=torch.float32)
-                    Rc = torch.tensor(float(game.Rc), device=device, dtype=torch.float32)
-                    n = torch.tensor(float(game.n), device=device, dtype=torch.float32)
+                    Rc = torch.tensor(float(circular_game.Rc), device=device, dtype=torch.float32)
+                    n = torch.tensor(float(circular_game.n), device=device, dtype=torch.float32)
                     x = x_raw_b[:, 0]
                     y = x_raw_b[:, 1]
                     z = x_raw_b[:, 2]
@@ -293,7 +439,7 @@ def main() -> None:
                     S = torch.zeros((xb.shape[0], 6, 6), dtype=torch.float32, device=device)
                     S[:, 3:6, 3:6] = (inv_Rp - inv_Re).unsqueeze(0)
 
-                    Q = torch.tensor(game.Q.astype(np.float32), device=device).unsqueeze(0)
+                    Q = torch.tensor(circular_game.Q.astype(np.float32), device=device).unsqueeze(0)
                     Rmat = torch.bmm(A.transpose(1, 2), P) + torch.bmm(P, A) - torch.bmm(torch.bmm(P, S), P) + Q
                     loss_are = torch.mean(Rmat * Rmat)
 
@@ -315,8 +461,9 @@ def main() -> None:
                 P = sym6_from_upper21(val_pred)
                 Px = torch.bmm(P, X_raw_val.to(device).unsqueeze(-1)).squeeze(-1)
                 BTPx = Px[:, 3:6]
-                inv_Rp = torch.tensor(game.inv_Rp.astype(np.float32), device=device)
-                inv_Re = torch.tensor(game.inv_Re.astype(np.float32), device=device)
+                inv_rp_scalar = torch.tensor(1e-13, dtype=torch.float32, device=device)
+                inv_Rp = inv_rp_scalar * torch.eye(3, dtype=torch.float32, device=device)
+                inv_Re = (inv_rp_scalar / (float(cfg.gamma) ** 2)) * torch.eye(3, dtype=torch.float32, device=device)
                 u_p = -(BTPx @ inv_Rp.T)
                 u_e = (BTPx @ inv_Re.T)
                 u_net = u_p + u_e
