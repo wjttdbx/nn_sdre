@@ -13,6 +13,7 @@ import scipy.linalg as la
 from scipy.integrate import solve_ivp
 import matplotlib.pyplot as plt
 from matplotlib import animation
+from pathlib import Path
 
 from astropy import units as u
 from astropy.time import Time
@@ -202,8 +203,9 @@ class SpacecraftGamePoliastro:
         return np.hstack((chief_v, a_c, deputy_v, a_d)).astype(float)
 
 
-def save_eci_gif(chief_r_eci, deputy_r_eci, out_path="eci_animation_poliastro.gif", stride=5, fps=20):
+def save_eci_gif(chief_r_eci, deputy_r_eci, out_path="outputs/gifs/eci_animation_poliastro.gif", stride=5, fps=20):
     """保存 ECI 三维轨迹动图"""
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     idx = np.arange(0, chief_r_eci.shape[1], stride, dtype=int)
 
     fig = plt.figure(figsize=(10, 8))
@@ -327,7 +329,7 @@ if __name__ == "__main__":
     if SAVE_GIF:
         chief_r_eci = sol.y[0:3]
         deputy_r_eci = sol.y[6:9]
-        save_eci_gif(chief_r_eci, deputy_r_eci, out_path="eci_animation_poliastro.gif", stride=5, fps=20)
+        save_eci_gif(chief_r_eci, deputy_r_eci, out_path="outputs/gifs/eci_animation_poliastro.gif", stride=5, fps=20)
 
     # LVLH 相对轨迹
     rel_xyz = np.zeros((3, sol.t.size), dtype=float)

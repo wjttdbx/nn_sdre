@@ -143,7 +143,7 @@ def sym6_from_upper21(u: torch.Tensor) -> torch.Tensor:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train a torch surrogate for SDRE control (circular LVLH).")
-    parser.add_argument("--out", type=str, default="sdre_control_net.pt", help="Output model path")
+    parser.add_argument("--out", type=str, default="models/control/sdre_control_net.pt", help="Output model path")
     parser.add_argument("--n-samples", type=int, default=8000)
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch-size", type=int, default=512)
@@ -335,6 +335,7 @@ def main() -> None:
         best_state = model.state_dict()
 
     out_path = Path(args.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "config": asdict(cfg),
         "model": {

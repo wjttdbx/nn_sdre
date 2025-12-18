@@ -9,6 +9,27 @@ import matplotlib.pyplot as plt
 from python_SDRE import SpacecraftGame, plot_earth_sphere, save_eci_gif
 
 
+def resolve_model_path(path_str: str) -> Path:
+    """Resolve a model path.
+
+    Supports:
+    - direct paths (existing)
+    - basenames searched under models/control and models/value
+    """
+    p = Path(path_str)
+    if p.exists():
+        return p
+
+    candidates = [
+        Path("models/control") / path_str,
+        Path("models/value") / path_str,
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+    return p
+
+
 class TorchSurrogate:
     def __init__(self, model_path: str):
         payload = torch.load(model_path, map_location="cpu", weights_only=False)
@@ -192,7 +213,12 @@ def rollout_controls(game: SpacecraftGame, surrogate: TorchSurrogate, states: np
 
 def main():
     parser = argparse.ArgumentParser(description="Circular LVLH SDRE simulation with a torch surrogate control law")
-    parser.add_argument("--model", type=str, default="sdre_control_net.pt", help="Path to trained surrogate model")
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="models/control/sdre_control_net.pt",
+        help="Path to trained surrogate model (.pt). If a basename is given, searches models/control and models/value.",
+    )
     parser.add_argument("--tf", type=float, default=10000.0)
     parser.add_argument("--dt", type=float, default=10.0)
     parser.add_argument("--save-gif", action="store_true")
@@ -201,9 +227,11 @@ def main():
     parser.add_argument("--target", type=str, default=None, choices=["u_net", "u_p"], help="Override control target")
     args = parser.parse_args()
 
-    model_path = Path(args.model)
+    model_path = resolve_model_path(args.model)
     if not model_path.exists():
-        raise FileNotFoundError(f"Model not found: {model_path}. Train it with train_control_surrogate_torch.py")
+        raise FileNotFoundError(
+            f"Model not found: {model_path}. Train it with train_control_surrogate_torch.py or train_value_pinn_torch.py"
+        )
 
     game = SpacecraftGame(chief_semi_major_axis=15000.0, chief_eccentricity=0.5, gamma=np.sqrt(2.0))
     surrogate = TorchSurrogate(str(model_path))
@@ -305,7 +333,8 @@ def main():
         plt.show()
 
     if args.save_gif:
-        save_eci_gif(chief_r_eci, pursuer_r_eci, out_path="eci_animation_nn.gif", stride=5, fps=20)
+        Path("outputs/gifs").mkdir(parents=True, exist_ok=True)
+        save_eci_gif(chief_r_eci, pursuer_r_eci, out_path="outputs/gifs/eci_animation_nn.gif", stride=5, fps=20)
 
     dist = np.sqrt(sol_nn.y[0] ** 2 + sol_nn.y[1] ** 2 + sol_nn.y[2] ** 2)
     if not args.no_plots:

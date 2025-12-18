@@ -1,0 +1,41 @@
+{
+  "config": {
+    "a_c_km": 15000.0,
+    "e_c": 0.5,
+    "gamma": 1.4142135623730951,
+    "n_samples": 8000,
+    "seed": 0,
+    "pos_range_km": 1000.0,
+    "vel_range_km_s": 0.05,
+    "batch_size": 512,
+    "epochs": 50,
+    "lr": 0.0003,
+    "weight_decay": 1e-06,
+    "hidden": 256,
+    "layers": 3,
+    "lambda_bc": 1.0,
+    "norm_mode": "residual",
+    "w_residual": 1.0,
+    "w_xQx": 0.0,
+    "w_up": 0.0,
+    "w_ue": 0.0,
+    "w_adv": 0.0,
+    "target": "u_net"
+  },
+  "model": {
+    "in_dim": 6,
+    "out_dim": 1,
+    "hidden": 256,
+    "layers": 3,
+    "activation": "tanh",
+    "type": "V"
+  },
+  "scales": {
+    "s_xQx": 959386.813168956,
+    "s_up": 5080885.047963593,
+    "s_ue": 2540442.5239817956,
+    "s_adv": 3529679.5023175394,
+    "s_res": 75949.46763614786
+  },
+  "best_train_loss": 216.56601928710938
+}

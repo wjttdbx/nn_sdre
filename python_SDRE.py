@@ -3,6 +3,7 @@ import scipy.linalg as la
 from scipy.integrate import solve_ivp
 import matplotlib.pyplot as plt
 from matplotlib import animation
+from pathlib import Path
 
 # ==========================================
 # 物理常数与参数定义
@@ -20,8 +21,9 @@ def plot_earth_sphere(ax, radius=RE_EARTH, n_u=36, n_v=18, alpha=0.25):
     ax.plot_surface(x, y, z, rstride=1, cstride=1, color="lightgray", linewidth=0, alpha=alpha)
 
 
-def save_eci_gif(chief_r_eci, pursuer_r_eci, out_path="eci_animation.gif", stride=5, fps=20):
+def save_eci_gif(chief_r_eci, pursuer_r_eci, out_path="outputs/gifs/eci_animation.gif", stride=5, fps=20):
     """保存ECI三维轨迹动图（GIF）。"""
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     idx = np.arange(0, chief_r_eci.shape[1], stride, dtype=int)
 
     fig = plt.figure(figsize=(10, 8))
@@ -375,7 +377,7 @@ if __name__ == "__main__":
     plt.show()
 
     if SAVE_GIF:
-        save_eci_gif(chief_r_eci, pursuer_r_eci, out_path="eci_animation.gif", stride=5, fps=20)
+        save_eci_gif(chief_r_eci, pursuer_r_eci, out_path="outputs/gifs/eci_animation.gif", stride=5, fps=20)
     
     # 相对距离随时间变化
     dist = np.sqrt(sol.y[0]**2 + sol.y[1]**2 + sol.y[2]**2)

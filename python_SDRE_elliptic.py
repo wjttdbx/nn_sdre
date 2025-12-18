@@ -3,6 +3,7 @@ import scipy.linalg as la
 from scipy.integrate import solve_ivp
 import matplotlib.pyplot as plt
 from matplotlib import animation
+from pathlib import Path
 
 MU_EARTH = 398600.4418  # km^3/s^2
 RE_EARTH = 6378.137     # km
@@ -20,6 +21,7 @@ def plot_earth_sphere(ax, radius=RE_EARTH, n_u=36, n_v=18, alpha=0.25):
 def save_eci_gif(chief_r_eci, deputy_r_eci, out_path="eci_animation_elliptic.gif", stride=5, fps=20):
     """保存ECI三维轨迹动图（GIF）。"""
     idx = np.arange(0, chief_r_eci.shape[1], stride, dtype=int)
+    Path("outputs/gifs").mkdir(parents=True, exist_ok=True)
 
     fig = plt.figure(figsize=(10, 8))
     ax = plt.axes(projection="3d")
@@ -323,7 +325,7 @@ if __name__ == "__main__":
     if SAVE_GIF:
         chief_r_eci = sol.y[0:3]
         deputy_r_eci = sol.y[6:9]
-        save_eci_gif(chief_r_eci, deputy_r_eci, out_path="eci_animation_elliptic.gif", stride=5, fps=20)
+        save_eci_gif(chief_r_eci, deputy_r_eci, out_path="outputs/gifs/eci_animation_elliptic.gif", stride=5, fps=20)
 
     # reconstruct relative LVLH trajectory for plotting
     rel_xyz = np.zeros((3, sol.t.size), dtype=float)

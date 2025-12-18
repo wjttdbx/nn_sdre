@@ -2,4 +2,10 @@ torch>=1.9.0
 numpy>=1.19.0
 scipy>=1.5.0
 matplotlib>=3.3.0
-scikit-learn>=0.24.0
+pillow>=9.0.0
+
+# Optional (only needed for python_SDRE_poliastro.py)
+# NOTE: this repo previously used a legacy poliastro version.
+# If you need the poliastro-based demo, pin to a compatible pair, e.g.:
+# poliastro==0.7.0
+# astropy==2.0.16

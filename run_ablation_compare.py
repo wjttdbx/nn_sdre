@@ -10,6 +10,20 @@ import torch
 from python_SDRE import SpacecraftGame
 
 
+def resolve_model_path(path_str: str) -> Path:
+    p = Path(path_str)
+    if p.exists():
+        return p
+    candidates = [
+        Path("models/control") / path_str,
+        Path("models/value") / path_str,
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+    return p
+
+
 def rmse(a: np.ndarray, b: np.ndarray) -> float:
     d = a - b
     return float(np.sqrt(np.mean(d * d)))
@@ -245,7 +259,11 @@ def main() -> None:
     parser.add_argument(
         "--models",
         nargs="+",
-        default=["sdre_control_net.pt", "sdre_control_net_P_are0.pt", "sdre_control_net_P_are1e-3.pt"],
+        default=[
+            "models/control/sdre_control_net.pt",
+            "models/control/sdre_control_net_P_are0.pt",
+            "models/control/sdre_control_net_P_are1e-3.pt",
+        ],
         help="List of model .pt files to compare",
     )
     parser.add_argument("--tf", type=float, default=6000.0)
@@ -256,7 +274,7 @@ def main() -> None:
 
     rows = []
     for m in args.models:
-        p = Path(m)
+        p = resolve_model_path(m)
         if not p.exists():
             raise FileNotFoundError(f"Model not found: {p}")
         print(f"Running: {p} (tf={args.tf}, dt={args.dt})", flush=True)

@@ -36,6 +36,14 @@ class ValuePINNConfig:
     # loss weights
     lambda_bc: float = 1.0
 
+    # residual normalization
+    norm_mode: str = "residual"  # none | residual | terms
+    w_residual: float = 1.0
+    w_xQx: float = 0.0
+    w_up: float = 0.0
+    w_ue: float = 0.0
+    w_adv: float = 0.0
+
     # whether the implied policy is u_net or u_p
     target: str = "u_net"  # u_net | u_p
 
@@ -143,9 +151,65 @@ def hji_residual(game: SpacecraftGame, x_raw: torch.Tensor, x_norm: torch.Tensor
     return res
 
 
+def approx_scales_from_P0(game: SpacecraftGame, X: np.ndarray, target: str) -> dict:
+    """Compute fixed reference scales for normalizing HJI terms.
+
+    Uses a constant Riccati solution P0 at the origin (A(x=0)) to approximate gradV and u.
+    This is fast and gives stable, model-independent scales.
+    """
+    x0 = np.zeros(6, dtype=float)
+    A0, Bp0, Be0 = game.get_sdc_matrices(x0)
+    P0 = game.solve_game_riccati(A0, Bp0, Be0)
+    if P0 is None:
+        raise RuntimeError("Failed to compute P0 at origin; check game parameters")
+
+    Q = game.Q
+    Rp = game.Rp
+    Re = game.Re
+
+    # V(x) ~ x^T P0 x => gradV = 2 P0 x, so grad_v = 2(P0 x)[3:6]
+    gradV = (2.0 * (X @ P0.T)).astype(np.float64)  # (N,6)
+    grad_v = gradV[:, 3:6]
+
+    u_p = -0.5 * (grad_v @ game.inv_Rp.T)
+    u_e = +0.5 * (grad_v @ game.inv_Re.T)
+    u = u_p if target == "u_p" else (u_p + u_e)
+
+    xQx = np.einsum("bi,ij,bj->b", X, Q, X)
+    up = np.einsum("bi,ij,bj->b", u_p, Rp, u_p)
+    ue = np.einsum("bi,ij,bj->b", u_e, Re, u_e)
+
+    # dynamics term using the same model as training
+    mu = 398600.4418
+    Rc = float(game.Rc)
+    n = float(game.n)
+    px, py, pz, vx, vy, vz = X[:, 0], X[:, 1], X[:, 2], X[:, 3], X[:, 4], X[:, 5]
+    r_d = np.sqrt((Rc + px) ** 2 + py**2 + pz**2)
+    ax0 = 2.0 * n * vy + (n**2) * px + mu / (Rc**2) - mu * (Rc + px) / (r_d**3)
+    ay0 = -2.0 * n * vx + (n**2) * py - mu * py / (r_d**3)
+    az0 = -mu * pz / (r_d**3)
+    f = np.stack([vx, vy, vz, ax0 + u[:, 0], ay0 + u[:, 1], az0 + u[:, 2]], axis=1)
+    adv = np.sum(gradV * f, axis=1)
+
+    res = xQx + up - ue + adv
+
+    def med_abs(a: np.ndarray) -> float:
+        return float(np.median(np.abs(a)))
+
+    eps = 1e-12
+    scales = {
+        "s_xQx": med_abs(xQx) + eps,
+        "s_up": med_abs(up) + eps,
+        "s_ue": med_abs(ue) + eps,
+        "s_adv": med_abs(adv) + eps,
+        "s_res": med_abs(res) + eps,
+    }
+    return scales
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train a value-function PINN (stationary HJI residual) for the circular LVLH SDRE game.")
-    parser.add_argument("--out", type=str, default="sdre_value_net.pt", help="Output model path")
+    parser.add_argument("--out", type=str, default="models/value/sdre_value_net.pt", help="Output model path")
     parser.add_argument("--n-samples", type=int, default=8000)
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch-size", type=int, default=512)
@@ -153,6 +217,12 @@ def main() -> None:
     parser.add_argument("--vel-range-km-s", type=float, default=0.05)
     parser.add_argument("--lambda-bc", type=float, default=1.0)
     parser.add_argument("--target", type=str, default="u_net", choices=["u_net", "u_p"])
+    parser.add_argument("--norm-mode", type=str, default="residual", choices=["none", "residual", "terms"], help="How to normalize HJI loss")
+    parser.add_argument("--w-residual", type=float, default=1.0)
+    parser.add_argument("--w-xQx", type=float, default=0.0)
+    parser.add_argument("--w-up", type=float, default=0.0)
+    parser.add_argument("--w-ue", type=float, default=0.0)
+    parser.add_argument("--w-adv", type=float, default=0.0)
     args = parser.parse_args()
 
     cfg = ValuePINNConfig(
@@ -163,11 +233,23 @@ def main() -> None:
         vel_range_km_s=args.vel_range_km_s,
         lambda_bc=float(args.lambda_bc),
         target=args.target,
+        norm_mode=str(args.norm_mode),
+        w_residual=float(args.w_residual),
+        w_xQx=float(args.w_xQx),
+        w_up=float(args.w_up),
+        w_ue=float(args.w_ue),
+        w_adv=float(args.w_adv),
     )
 
     game = SpacecraftGame(chief_semi_major_axis=cfg.a_c_km, chief_eccentricity=cfg.e_c, gamma=cfg.gamma)
 
     X = build_dataset(cfg)  # (N,6)
+
+    ref_scales = approx_scales_from_P0(game, X.astype(np.float64), target=cfg.target)
+    print(
+        "Reference scales (median abs, from P0 approximation): "
+        + ", ".join([f"{k}={v:.6g}" for k, v in ref_scales.items()])
+    )
 
     # normalization for stable training
     x_mean = X.mean(axis=0)
@@ -186,6 +268,11 @@ def main() -> None:
     opt = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
 
     x_std = torch.tensor(x_std_np, dtype=torch.float32, device=device)
+    s_xQx = torch.tensor(ref_scales["s_xQx"], dtype=torch.float32, device=device)
+    s_up = torch.tensor(ref_scales["s_up"], dtype=torch.float32, device=device)
+    s_ue = torch.tensor(ref_scales["s_ue"], dtype=torch.float32, device=device)
+    s_adv = torch.tensor(ref_scales["s_adv"], dtype=torch.float32, device=device)
+    s_res = torch.tensor(ref_scales["s_res"], dtype=torch.float32, device=device)
 
     best = float("inf")
     best_state = None
@@ -205,8 +292,49 @@ def main() -> None:
             xb_norm = xb_norm.clone().detach().requires_grad_(True)
             Vb = model(xb_norm)
 
-            res = hji_residual(game, xb_raw, xb_norm, Vb, x_std=x_std, target=cfg.target)
-            loss_pde = torch.mean(res * res)
+            # Compute terms for optional component-wise normalization
+            gradV_norm = torch.autograd.grad(Vb.sum(), xb_norm, create_graph=True)[0]
+            gradV = gradV_norm / x_std
+            grad_v = gradV[:, 3:6]
+
+            inv_Rp = torch.tensor(game.inv_Rp.astype(np.float32), device=device)
+            inv_Re = torch.tensor(game.inv_Re.astype(np.float32), device=device)
+            Rp = torch.tensor(game.Rp.astype(np.float32), device=device)
+            Re = torch.tensor(game.Re.astype(np.float32), device=device)
+            Q = torch.tensor(game.Q.astype(np.float32), device=device)
+
+            u_p = -0.5 * (grad_v @ inv_Rp.T)
+            u_e = +0.5 * (grad_v @ inv_Re.T)
+            u = u_p if cfg.target == "u_p" else (u_p + u_e)
+
+            xQx = torch.einsum("bi,ij,bj->b", xb_raw, Q, xb_raw)
+            up = torch.einsum("bi,ij,bj->b", u_p, Rp, u_p)
+            ue = torch.einsum("bi,ij,bj->b", u_e, Re, u_e)
+
+            f = dynamics_f(game, xb_raw, u)
+            adv = torch.sum(gradV * f, dim=1)
+
+            res = xQx + up - ue + adv
+
+            if cfg.norm_mode == "none":
+                loss_pde = torch.mean(res * res)
+            elif cfg.norm_mode == "residual":
+                loss_pde = torch.mean((res / s_res) ** 2)
+            elif cfg.norm_mode == "terms":
+                # Sum of normalized term energies, plus (optionally) residual energy.
+                loss_pde = torch.tensor(0.0, device=device)
+                if cfg.w_xQx != 0.0:
+                    loss_pde = loss_pde + float(cfg.w_xQx) * torch.mean((xQx / s_xQx) ** 2)
+                if cfg.w_up != 0.0:
+                    loss_pde = loss_pde + float(cfg.w_up) * torch.mean((up / s_up) ** 2)
+                if cfg.w_ue != 0.0:
+                    loss_pde = loss_pde + float(cfg.w_ue) * torch.mean((ue / s_ue) ** 2)
+                if cfg.w_adv != 0.0:
+                    loss_pde = loss_pde + float(cfg.w_adv) * torch.mean((adv / s_adv) ** 2)
+                if cfg.w_residual != 0.0:
+                    loss_pde = loss_pde + float(cfg.w_residual) * torch.mean((res / s_res) ** 2)
+            else:
+                raise ValueError(f"Unknown norm_mode: {cfg.norm_mode}")
 
             # boundary condition at origin: V(0)=0
             x0_norm_req = x0_norm.clone().detach().requires_grad_(True)
@@ -230,12 +358,13 @@ def main() -> None:
             best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
 
         if epoch == 1 or epoch % 5 == 0 or epoch == cfg.epochs:
-            print(f"Epoch {epoch:03d}: loss={train_loss:.6g} best={best:.6g}")
+            print(f"Epoch {epoch:03d}: loss={train_loss:.6g} best={best:.6g} (mode={cfg.norm_mode})")
 
     if best_state is None:
         best_state = model.state_dict()
 
     out_path = Path(args.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "config": asdict(cfg),
         "model": {
@@ -252,6 +381,7 @@ def main() -> None:
             "y_mean": np.zeros((1,), dtype=np.float32),
             "y_std": np.ones((1,), dtype=np.float32),
         },
+        "scales": {k: float(v) for k, v in ref_scales.items()},
         "state_dict": best_state,
     }
 
@@ -261,6 +391,7 @@ def main() -> None:
     meta = {
         "config": asdict(cfg),
         "model": payload["model"],
+        "scales": payload["scales"],
         "best_train_loss": float(best),
     }
     out_meta = out_path.with_suffix(".json")

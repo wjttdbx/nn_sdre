@@ -7,7 +7,9 @@
 - [项目简介](#项目简介)
 - [版本对比](#版本对比)
 - [依赖环境](#依赖环境)
+- [仓库结构与文件说明](#仓库结构与文件说明)
 - [快速开始](#快速开始)
+- [模型训练与消融对比](#模型训练与消融对比)
 - [仿真参数](#仿真参数)
 - [输出结果](#输出结果)
 - [版本详细说明](#版本详细说明)
@@ -48,7 +50,7 @@
 ### 基础依赖（所有版本）
 
 ```bash
-pip install numpy scipy matplotlib
+pip install -r requirement.txt
 ```
 
 ### poliastro 版本额外依赖
@@ -57,7 +59,49 @@ pip install numpy scipy matplotlib
 pip install astropy poliastro
 ```
 
-**Python 版本要求**：≥ 3.9
+**Python 版本建议**：
+
+- 纯仿真（不含 torch）：Python ≥ 3.9 通常可用
+- 含 torch 的训练/推理脚本：建议 Python 3.10/3.11（取决于你要安装的 torch 版本是否提供对应 wheel；例如 Python 3.13 可能尚无 torch 官方轮子）
+
+> 如果你需要运行 `python_SDRE_poliastro.py`，仓库里曾使用过较老版本的 poliastro/astropy 组合；见 [requirement.txt](requirement.txt) 的注释说明。
+
+---
+
+## 仓库结构与文件说明
+
+### 目录结构（建议）
+
+```text
+SDRE/
+   models/
+      control/               # 控制律模型（u 或 P）权重与配置
+      value/                 # 值函数模型（V）权重与配置
+   outputs/
+      gifs/                  # 生成的 GIF 动画
+      reports/               # 对比表格/CSV（可选）
+   python_SDRE.py           # 圆轨道 LVLH 近似版（teacher / 基线仿真）
+   python_SDRE_elliptic.py  # 严格椭圆两体版（ECI 两体积分）
+   python_SDRE_poliastro.py # poliastro 版（标准轨道库）
+   python_SDRE_nn.py        # 用已训练模型做闭环仿真，并可与 teacher 对比
+   train_control_surrogate_torch.py # 训练控制律 surrogate（u 或 P，监督/消融）
+   train_value_pinn_torch.py        # 训练值函数 PINN（V，HJI 残差 + 归一化）
+   run_ablation_compare.py  # 一键跑消融对比并输出指标表（可导出 CSV）
+   requirement.txt
+   提示.md
+```
+
+### 文件用途（简述）
+
+- `python_SDRE.py`：圆轨道 LVLH 近似版；同时也是“teacher”（在线解 GARE）控制律来源。
+- `python_SDRE_elliptic.py`：严格椭圆两体版；在 ECI 对 chief/deputy 做两体积分，再投影到 LVLH 求 SDRE 控制。
+- `python_SDRE_poliastro.py`：用 poliastro/astropy 初始化并传播轨道的版本，便于后续工程扩展。
+- `train_control_surrogate_torch.py`：训练控制律网络（两种结构）：
+  - `model-type=u`：网络直接输出控制向量 `u`（3 维）。
+  - `model-type=P`：网络输出对称矩阵 `P`（21 维），再由 `u = -R^{-1} B^T P x` 得到控制；可加 ARE 残差做消融。
+- `train_value_pinn_torch.py`：训练值函数 `V(x)`（1 维标量），用 HJI/HJB 残差作为“PDE 约束”；支持残差/分项归一化。
+- `python_SDRE_nn.py`：加载 `models/` 下的模型（u / P / V），闭环仿真并可用 `--compare-teacher` 与在线 teacher 对比。
+- `run_ablation_compare.py`：固定步长滚动（RK4）的一键对比脚本，适合长时（例如 6000s）消融，输出表格并可写 CSV。
 
 ---
 
@@ -98,7 +142,81 @@ python python_SDRE_poliastro.py
 SAVE_GIF = True  # 默认为 False
 ```
 
-运行后将在当前目录生成 `eci_animation*.gif`。
+运行后将在 `outputs/gifs/` 下生成 `eci_animation*.gif`。
+
+---
+
+## 模型训练与消融对比
+
+### 1) 训练控制律模型（监督学习 / 消融）
+
+训练 baseline（直接输出 `u`）：
+
+```bash
+python train_control_surrogate_torch.py \
+   --out models/control/sdre_control_net.pt \
+   --model-type u \
+   --target u_net \
+   --n-samples 8000 \
+   --epochs 50
+```
+
+训练结构化 `P`（无 ARE 残差）：
+
+```bash
+python train_control_surrogate_torch.py \
+   --out models/control/sdre_control_net_P_are0.pt \
+   --model-type P \
+   --lambda-are 0 \
+   --target u_net
+```
+
+训练结构化 `P`（含 ARE 残差，做消融）：
+
+```bash
+python train_control_surrogate_torch.py \
+   --out models/control/sdre_control_net_P_are1e-3.pt \
+   --model-type P \
+   --lambda-are 1e-3 \
+   --target u_net
+```
+
+### 2) 训练值函数模型（PINN / HJI 残差）
+
+推荐使用残差归一化（避免尺度过大导致训练不稳定）：
+
+```bash
+python train_value_pinn_torch.py \
+   --out models/value/sdre_value_net_norm.pt \
+   --n-samples 8000 \
+   --epochs 50 \
+   --batch-size 512 \
+   --lambda-bc 1.0 \
+   --target u_net \
+   --norm-mode residual
+```
+
+### 3) 用训练好的模型做闭环仿真（并与 teacher 对比）
+
+```bash
+python python_SDRE_nn.py \
+   --model models/control/sdre_control_net.pt \
+   --tf 6000 --dt 10 \
+   --compare-teacher --no-plots
+```
+
+### 4) 一键跑消融并输出对比表（可导出 CSV）
+
+```bash
+python run_ablation_compare.py \
+   --models \
+      models/control/sdre_control_net.pt \
+      models/control/sdre_control_net_P_are0.pt \
+      models/control/sdre_control_net_P_are1e-3.pt \
+      models/value/sdre_value_net_norm.pt \
+   --tf 6000 --dt 10 \
+   --csv outputs/reports/ablation_6000s.csv
+```
 
 ---
 
