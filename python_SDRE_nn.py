@@ -200,6 +200,14 @@ def rmse(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.sqrt(np.mean(d * d)))
 
 
+def closest_approach(sol) -> tuple[float, float, int]:
+    """Return (min_dist_km, t_at_min_s, k_index) for a solve_ivp solution."""
+    # sol.y shape: (6, N) for relative LVLH states
+    dist = np.sqrt(sol.y[0] ** 2 + sol.y[1] ** 2 + sol.y[2] ** 2)
+    k = int(np.argmin(dist))
+    return float(dist[k]), float(sol.t[k]), k
+
+
 def rollout_controls(game: SpacecraftGame, surrogate: TorchSurrogate, states: np.ndarray, *, target: str) -> tuple[np.ndarray, np.ndarray]:
     """Return (u_teacher, u_nn) evaluated on the same state sequence."""
     u_t = np.zeros((states.shape[0], 3), dtype=float)
@@ -247,11 +255,17 @@ def main():
     sol_nn = simulate_with_nn(game, surrogate, x0, t_span, t_eval, target=target, max_step=max_step)
     print("NN 仿真结束.")
 
+    min_dist_nn, t_min_nn, k_min_nn = closest_approach(sol_nn)
+    print(f"NN 最近距离: {min_dist_nn:.6g} km @ t={t_min_nn:.6g} s")
+
     sol_teacher = None
     if args.compare_teacher:
         print("开始 teacher (在线 SDRE/GARE) 仿真...")
         sol_teacher = simulate_with_teacher(game, x0, t_span, t_eval, target=target, max_step=max_step)
         print("teacher 仿真结束.")
+
+        min_dist_t, t_min_t, k_min_t = closest_approach(sol_teacher)
+        print(f"Teacher 最近距离: {min_dist_t:.6g} km @ t={t_min_t:.6g} s")
 
         x_rmse = rmse(sol_nn.y.T, sol_teacher.y.T)
         dist_nn = np.sqrt(sol_nn.y[0] ** 2 + sol_nn.y[1] ** 2 + sol_nn.y[2] ** 2)
@@ -271,8 +285,27 @@ def main():
         plt.figure(figsize=(10, 8))
         ax = plt.axes(projection="3d")
         ax.plot3D(sol_nn.y[0], sol_nn.y[1], sol_nn.y[2], "b", label="NN (relative LVLH)")
+        ax.scatter3D(
+            sol_nn.y[0, k_min_nn],
+            sol_nn.y[1, k_min_nn],
+            sol_nn.y[2, k_min_nn],
+            c="b",
+            marker="x",
+            s=60,
+            label=f"NN closest (t={t_min_nn:.0f}s)",
+        )
         if sol_teacher is not None:
             ax.plot3D(sol_teacher.y[0], sol_teacher.y[1], sol_teacher.y[2], "k--", label="Teacher SDRE (relative LVLH)")
+            _, t_min_t, k_min_t = closest_approach(sol_teacher)
+            ax.scatter3D(
+                sol_teacher.y[0, k_min_t],
+                sol_teacher.y[1, k_min_t],
+                sol_teacher.y[2, k_min_t],
+                c="k",
+                marker="x",
+                s=60,
+                label=f"Teacher closest (t={t_min_t:.0f}s)",
+            )
         ax.scatter3D(0, 0, 0, c="r", marker="*", s=100, label="Evader (origin)")
         ax.scatter3D(x0[0], x0[1], x0[2], c="g", marker="o", label="Start")
         ax.set_xlabel("Radial x [km]")
@@ -323,8 +356,27 @@ def main():
         plot_earth_sphere(ax_eci)
         ax_eci.plot3D(chief_r_eci[0], chief_r_eci[1], chief_r_eci[2], "r", label="Target/Chief (ECI)")
         ax_eci.plot3D(pursuer_r_eci[0], pursuer_r_eci[1], pursuer_r_eci[2], "b", label="NN (ECI)")
+        ax_eci.scatter3D(
+            pursuer_r_eci[0, k_min_nn],
+            pursuer_r_eci[1, k_min_nn],
+            pursuer_r_eci[2, k_min_nn],
+            c="b",
+            marker="x",
+            s=60,
+            label=f"NN closest (t={t_min_nn:.0f}s)",
+        )
         if pursuer_r_eci_teacher is not None:
             ax_eci.plot3D(pursuer_r_eci_teacher[0], pursuer_r_eci_teacher[1], pursuer_r_eci_teacher[2], "k--", label="Teacher SDRE (ECI)")
+            _, t_min_t, k_min_t = closest_approach(sol_teacher)
+            ax_eci.scatter3D(
+                pursuer_r_eci_teacher[0, k_min_t],
+                pursuer_r_eci_teacher[1, k_min_t],
+                pursuer_r_eci_teacher[2, k_min_t],
+                c="k",
+                marker="x",
+                s=60,
+                label=f"Teacher closest (t={t_min_t:.0f}s)",
+            )
         ax_eci.set_xlabel("ECI x [km]")
         ax_eci.set_ylabel("ECI y [km]")
         ax_eci.set_zlabel("ECI z [km]")
@@ -340,9 +392,12 @@ def main():
     if not args.no_plots:
         plt.figure()
         plt.plot(sol_nn.t, dist, label="NN")
+        plt.scatter([t_min_nn], [min_dist_nn], c="b", marker="x", s=60, label="NN closest")
         if sol_teacher is not None:
             dist_t = np.sqrt(sol_teacher.y[0] ** 2 + sol_teacher.y[1] ** 2 + sol_teacher.y[2] ** 2)
             plt.plot(sol_teacher.t, dist_t, "k--", label="Teacher")
+            min_dist_t, t_min_t, _ = closest_approach(sol_teacher)
+            plt.scatter([t_min_t], [min_dist_t], c="k", marker="x", s=60, label="Teacher closest")
         plt.xlabel("Time [s]")
         plt.ylabel("Relative Distance [km]")
         plt.title("Interception Progress")

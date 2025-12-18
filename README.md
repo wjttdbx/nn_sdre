@@ -98,7 +98,7 @@ SDRE/
 - `python_SDRE_poliastro.py`：用 poliastro/astropy 初始化并传播轨道的版本，便于后续工程扩展。
 - `train_control_surrogate_torch.py`：训练控制律网络（两种结构）：
   - `model-type=u`：网络直接输出控制向量 `u`（3 维）。
-   - `model-type=P`：网络输出对称矩阵 `P`（21 维），再由 `u = -R^{-1} B^T P x` 得到控制；可加 ARE 残差做消融（仅支持圆轨道 teacher）。
+  - `model-type=P`：网络输出对称矩阵 `P`（21 维），再由 `u = -R^{-1} B^T P x` 得到控制；可加 ARE 残差做消融（仅支持圆轨道 teacher）。
 - `train_value_pinn_torch.py`：训练值函数 `V(x)`（1 维标量），用 HJI/HJB 残差作为“PDE 约束”；支持残差/分项归一化。
 - `python_SDRE_nn.py`：加载 `models/` 下的模型（u / P / V），闭环仿真并可用 `--compare-teacher` 与在线 teacher 对比。
 - `run_ablation_compare.py`：固定步长滚动（RK4）的一键对比脚本，适合长时（例如 6000s）消融，输出表格并可写 CSV。

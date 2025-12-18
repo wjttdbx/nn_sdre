@@ -1,3 +1,4 @@
+import argparse
 import numpy as np
 import scipy.linalg as la
 from scipy.integrate import solve_ivp
@@ -304,6 +305,13 @@ class SpacecraftGame:
 # ==========================================
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Circular LVLH SDRE pursuit-evasion simulation (teacher).")
+    parser.add_argument("--tf", type=float, default=10000.0, help="Simulation horizon [s]")
+    parser.add_argument("--dt", type=float, default=10.0, help="Output step for t_eval [s]")
+    parser.add_argument("--no-plots", action="store_true", help="Skip plotting (useful for headless runs)")
+    parser.add_argument("--save-gif", action="store_true", help="Save ECI trajectory GIF to outputs/gifs/")
+    args = parser.parse_args()
+
     # 1. 设置仿真场景
     # Table 1
     game = SpacecraftGame(chief_semi_major_axis=15000.0, chief_eccentricity=0.5, gamma=np.sqrt(2.0))
@@ -313,32 +321,41 @@ if __name__ == "__main__":
     x0 = np.array([500.0, 500.0, 500.0, 0.01, 0.01, 0.01])
     
     # 3. 积分求解
-    t_span = (0, 10000) # 仿真 10000 秒
-    t_eval = np.arange(t_span[0], t_span[1] + 1e-9, 10.0)
+    t_span = (0.0, float(args.tf))
+    t_eval = np.arange(t_span[0], t_span[1] + 1e-9, float(args.dt))
     
     print("开始 SDRE 博弈仿真...")
     sol = solve_ivp(game.dynamics, t_span, x0, t_eval=t_eval, rtol=1e-5, atol=1e-8)
     print("仿真结束.")
 
-    SAVE_GIF = False  # 是否保存 ECI 轨迹动图
+    # 最近接近距离（LVLH 相对距离）
+    dist = np.sqrt(sol.y[0]**2 + sol.y[1]**2 + sol.y[2]**2)
+    k_min = int(np.argmin(dist))
+    min_dist = float(dist[k_min])
+    t_min = float(sol.t[k_min])
+    print(f"最近距离: {min_dist:.6g} km @ t={t_min:.6g} s")
+
+    SAVE_GIF = bool(args.save_gif)  # 是否保存 ECI 轨迹动图
     
     # 4. 结果可视化
-    plt.figure(figsize=(10, 8))
-    
-    # 3D 轨迹图
-    ax = plt.axes(projection='3d')
-    ax.plot3D(sol.y[0], sol.y[1], sol.y[2], 'b', label='Pursuer Trajectory')
-    ax.scatter3D(0, 0, 0, c='r', marker='*', s=100, label='Evader (Target)')
-    
-    # 起点标记
-    ax.scatter3D(x0[0], x0[1], x0[2], c='g', marker='o', label='Start')
-    
-    ax.set_xlabel('Radial (x) [km]')
-    ax.set_ylabel('Along-Track (y) [km]')
-    ax.set_zlabel('Cross-Track (z) [km]')
-    ax.set_title('Spacecraft Pursuit-Evasion Trajectory (LVLH Frame)')
-    ax.legend()
-    plt.show()
+    if not args.no_plots:
+        plt.figure(figsize=(10, 8))
+
+        # 3D 轨迹图
+        ax = plt.axes(projection='3d')
+        ax.plot3D(sol.y[0], sol.y[1], sol.y[2], 'b', label='Pursuer Trajectory')
+        ax.scatter3D(sol.y[0, k_min], sol.y[1, k_min], sol.y[2, k_min], c='b', marker='x', s=60, label=f'Closest (t={t_min:.0f}s)')
+        ax.scatter3D(0, 0, 0, c='r', marker='*', s=100, label='Evader (Target)')
+
+        # 起点标记
+        ax.scatter3D(x0[0], x0[1], x0[2], c='g', marker='o', label='Start')
+
+        ax.set_xlabel('Radial (x) [km]')
+        ax.set_ylabel('Along-Track (y) [km]')
+        ax.set_zlabel('Cross-Track (z) [km]')
+        ax.set_title('Spacecraft Pursuit-Evasion Trajectory (LVLH Frame)')
+        ax.legend()
+        plt.show()
 
     # 惯性系(ECI)下的轨迹：target/chief 作为圆轨道航天器随时间运动
     # 说明：本脚本的动力学是在 LVLH 相对系下积分得到 rho(t)。这里用理想圆轨道生成 chief 的 ECI 状态，
@@ -362,29 +379,33 @@ if __name__ == "__main__":
         rho = sol.y[0:3, k]
         pursuer_r_eci[:, k] = r + C_LI @ rho
 
-    plt.figure(figsize=(10, 8))
-    ax_eci = plt.axes(projection='3d')
-    plot_earth_sphere(ax_eci)
-    ax_eci.plot3D(chief_r_eci[0], chief_r_eci[1], chief_r_eci[2], 'r', label='Target/Chief (ECI)')
-    ax_eci.plot3D(pursuer_r_eci[0], pursuer_r_eci[1], pursuer_r_eci[2], 'b', label='Pursuer/Deputy (ECI)')
-    ax_eci.scatter3D(chief_r_eci[0, 0], chief_r_eci[1, 0], chief_r_eci[2, 0], c='r', marker='o', s=30)
-    ax_eci.scatter3D(pursuer_r_eci[0, 0], pursuer_r_eci[1, 0], pursuer_r_eci[2, 0], c='b', marker='o', s=30)
-    ax_eci.set_xlabel('ECI x [km]')
-    ax_eci.set_ylabel('ECI y [km]')
-    ax_eci.set_zlabel('ECI z [km]')
-    ax_eci.set_title('Inertial Trajectories (ECI)')
-    ax_eci.legend()
-    plt.show()
+    if not args.no_plots:
+        plt.figure(figsize=(10, 8))
+        ax_eci = plt.axes(projection='3d')
+        plot_earth_sphere(ax_eci)
+        ax_eci.plot3D(chief_r_eci[0], chief_r_eci[1], chief_r_eci[2], 'r', label='Target/Chief (ECI)')
+        ax_eci.plot3D(pursuer_r_eci[0], pursuer_r_eci[1], pursuer_r_eci[2], 'b', label='Pursuer/Deputy (ECI)')
+        ax_eci.scatter3D(pursuer_r_eci[0, k_min], pursuer_r_eci[1, k_min], pursuer_r_eci[2, k_min], c='b', marker='x', s=60, label=f'Closest (t={t_min:.0f}s)')
+        ax_eci.scatter3D(chief_r_eci[0, 0], chief_r_eci[1, 0], chief_r_eci[2, 0], c='r', marker='o', s=30)
+        ax_eci.scatter3D(pursuer_r_eci[0, 0], pursuer_r_eci[1, 0], pursuer_r_eci[2, 0], c='b', marker='o', s=30)
+        ax_eci.set_xlabel('ECI x [km]')
+        ax_eci.set_ylabel('ECI y [km]')
+        ax_eci.set_zlabel('ECI z [km]')
+        ax_eci.set_title('Inertial Trajectories (ECI)')
+        ax_eci.legend()
+        plt.show()
 
     if SAVE_GIF:
         save_eci_gif(chief_r_eci, pursuer_r_eci, out_path="outputs/gifs/eci_animation.gif", stride=5, fps=20)
     
     # 相对距离随时间变化
-    dist = np.sqrt(sol.y[0]**2 + sol.y[1]**2 + sol.y[2]**2)
-    plt.figure()
-    plt.plot(sol.t, dist)
-    plt.xlabel('Time [s]')
-    plt.ylabel('Relative Distance [km]')
-    plt.title('Interception Progress')
-    plt.grid(True)
-    plt.show()
+    if not args.no_plots:
+        plt.figure()
+        plt.plot(sol.t, dist)
+        plt.scatter([t_min], [min_dist], c='b', marker='x', s=60, label='Closest')
+        plt.xlabel('Time [s]')
+        plt.ylabel('Relative Distance [km]')
+        plt.title('Interception Progress')
+        plt.grid(True)
+        plt.legend()
+        plt.show()
